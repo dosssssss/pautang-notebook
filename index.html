@@ -1,0 +1,394 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Pautang Notebook</title>
+<meta name="description" content="Utang ledger for a sari-sari store. Data stays on this phone.">
+<meta name="theme-color" content="#0f6b55">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icons/icon-192.png" type="image/png">
+<link rel="apple-touch-icon" href="icons/apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Pautang">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;500;600;700&display=swap">
+<style>
+html{-webkit-text-size-adjust:100%}
+:root{padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+body{margin:0}
+[hidden]{display:none!important}
+/* Layout: one-column phone ledger. Sticky "frozen money" header, customer list below, bottom sheet for forms. */
+:root{
+  --bg:#eef3f0; --surface:#ffffff; --ink:#15302a; --muted:#5d7069; --line:#d5e0db;
+  --accent:#0f6b55; --accent-ink:#ffffff; --utang:#b4431f; --bayad:#1d7a46; --hi:#f6c445;
+  --display:"Bricolage Grotesque", "Trebuchet MS", system-ui, sans-serif;
+  --body:"Figtree", system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0e1916; --surface:#16241f; --ink:#e3eee9; --muted:#93a8a0; --line:#28392f;
+  --accent:#3fbf96; --accent-ink:#06231b; --utang:#f08a62; --bayad:#5fd18f; --hi:#f6c445; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0e1916; --surface:#16241f; --ink:#e3eee9; --muted:#93a8a0; --line:#28392f;
+  --accent:#3fbf96; --accent-ink:#06231b; --utang:#f08a62; --bayad:#5fd18f; --hi:#f6c445; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--ink);font-family:var(--body);font-size:16px;line-height:1.45;padding-inline:16px;padding-block:0 96px}
+.wrap{max-width:560px;margin:0 auto;display:flex;flex-direction:column;gap:16px}
+.num{font-variant-numeric:tabular-nums}
+button{font:inherit;cursor:pointer}
+button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px solid var(--hi);outline-offset:2px}
+
+/* Header */
+.top{position:sticky;top:env(safe-area-inset-top,0px);z-index:5;background:var(--bg);padding-block:12px 4px;display:flex;flex-direction:column;gap:12px}
+.brand{display:flex;justify-content:space-between;align-items:center;gap:8px}
+.brand h1{font-family:var(--display);font-weight:800;font-size:1.25rem;margin:0;letter-spacing:-.01em}
+.brand small{color:var(--muted);font-size:.8rem}
+.frozen{background:var(--accent);color:var(--accent-ink);border-radius:18px;padding:16px 18px;display:grid;grid-template-columns:1fr auto;gap:4px 12px;align-items:end}
+.frozen .lbl{font-size:.75rem;text-transform:uppercase;letter-spacing:.08em;opacity:.85;grid-column:1/-1}
+.frozen .amt{font-family:var(--display);font-weight:800;font-size:clamp(2rem,9vw,2.6rem);line-height:1.05;letter-spacing:-.02em}
+.frozen .meta{font-size:.85rem;opacity:.9;text-align:right}
+
+.search{width:100%;padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--surface);color:var(--ink);font:inherit}
+
+.banner{display:flex;gap:10px;align-items:center;justify-content:space-between;flex-wrap:wrap;background:color-mix(in srgb,var(--hi) 22%,var(--surface));border:1px dashed color-mix(in srgb,var(--hi) 70%,var(--line));padding:10px 12px;border-radius:12px;font-size:.9rem}
+.banner button{background:none;border:1px solid var(--ink);color:var(--ink);border-radius:999px;padding:4px 12px;font-size:.85rem}
+
+/* Customer list */
+.list{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.row{display:grid;grid-template-columns:40px 1fr auto;gap:12px;align-items:center;padding:12px 14px;border:0;border-bottom:1px solid var(--line);background:none;color:inherit;text-align:left;width:100%}
+.row:last-child{border-bottom:0}
+.row:hover{background:color-mix(in srgb,var(--accent) 6%,transparent)}
+.av{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;font-weight:700;background:color-mix(in srgb,var(--accent) 16%,var(--surface));color:var(--accent)}
+.row .who{min-width:0}
+.row .name{font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.row .sub{font-size:.82rem;color:var(--muted)}
+.row .bal{font-weight:700;text-align:right}
+.bal.owes{color:var(--utang)}
+.bal.clear{color:var(--bayad)}
+.pill{display:inline-block;font-size:.7rem;font-weight:700;padding:1px 8px;border-radius:999px;text-transform:uppercase;letter-spacing:.05em}
+.pill.paid{background:color-mix(in srgb,var(--bayad) 16%,transparent);color:var(--bayad)}
+.pill.old{background:color-mix(in srgb,var(--utang) 14%,transparent);color:var(--utang)}
+.empty{padding:28px 18px;text-align:center;color:var(--muted)}
+.section-h{display:flex;justify-content:space-between;align-items:baseline;font-size:.78rem;text-transform:uppercase;letter-spacing:.08em;color:var(--muted);margin:4px 2px -8px}
+
+/* Customer detail */
+.back{background:none;border:0;color:var(--accent);font-weight:600;padding:4px 0;align-self:flex-start}
+.cust-h{display:flex;flex-direction:column;gap:2px}
+.cust-h h2{font-family:var(--display);font-weight:800;font-size:1.6rem;margin:0;text-wrap:balance}
+.cust-h .bal{font-family:var(--display);font-weight:800;font-size:2rem}
+.actions{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.btn{border:0;border-radius:12px;padding:14px;font-weight:700;font-size:1rem}
+.btn.utang{background:var(--utang);color:#fff}
+.btn.bayad{background:var(--bayad);color:#fff}
+.btn.pri{background:var(--accent);color:var(--accent-ink)}
+.btn.ghost{background:none;border:1px solid var(--line);color:var(--ink)}
+.btn.danger{background:none;border:1px solid var(--utang);color:var(--utang)}
+.ledger{display:flex;flex-direction:column;background:var(--surface);border:1px solid var(--line);border-radius:16px;overflow:hidden}
+.ent{display:grid;grid-template-columns:1fr auto;gap:2px 12px;padding:12px 14px;border:0;border-bottom:1px solid var(--line);background:none;color:inherit;text-align:left;width:100%}
+.ent:last-child{border-bottom:0}
+.ent .d{font-size:.8rem;color:var(--muted)}
+.ent .n{min-width:0;overflow-wrap:anywhere}
+.ent .a{font-weight:700;text-align:right}
+.ent .r{font-size:.8rem;color:var(--muted);text-align:right}
+.ent.utang .a{color:var(--utang)}
+.ent.bayad .a{color:var(--bayad)}
+.tools{display:flex;gap:10px;flex-wrap:wrap}
+.tools .btn{flex:1 1 140px;padding:10px;font-size:.9rem}
+
+/* FAB */
+.fab{position:fixed;right:16px;bottom:calc(16px + env(safe-area-inset-bottom,0px));background:var(--accent);color:var(--accent-ink);border:0;border-radius:999px;padding:14px 20px;font-weight:700;box-shadow:0 6px 20px rgb(0 0 0 / .22);z-index:6}
+
+/* Bottom sheet */
+.scrim{position:fixed;inset:0;background:rgb(0 0 0 / .45);z-index:10;display:flex;align-items:flex-end;justify-content:center}
+.sheet{background:var(--surface);color:var(--ink);width:100%;max-width:560px;border-radius:20px 20px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom,0px));display:flex;flex-direction:column;gap:14px;max-height:92%;overflow:auto}
+.sheet h3{font-family:var(--display);font-weight:800;margin:0;font-size:1.3rem}
+.field{display:flex;flex-direction:column;gap:6px}
+.field label{font-size:.85rem;font-weight:600;color:var(--muted)}
+.field input,.field textarea{padding:12px 14px;border:1px solid var(--line);border-radius:12px;background:var(--bg);color:var(--ink);font:inherit;width:100%}
+.field textarea{min-height:84px;resize:vertical}
+.peso{position:relative}
+.peso span{position:absolute;left:14px;top:50%;transform:translateY(-50%);font-weight:700;color:var(--muted)}
+.peso input{padding-left:30px;font-size:1.3rem;font-weight:700}
+.quick{display:flex;gap:8px;flex-wrap:wrap}
+.quick button{border:1px solid var(--line);background:var(--bg);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:.85rem}
+.err{color:var(--utang);font-size:.85rem;min-height:1em}
+.sheet .row2{display:flex;gap:10px}
+.sheet .row2 .btn{flex:1}
+.items{display:flex;flex-direction:column;gap:10px}
+.it{display:grid;grid-template-columns:1fr 64px 92px 32px;gap:6px;align-items:center}
+.it input{padding:10px;border:1px solid var(--line);border-radius:10px;background:var(--bg);color:var(--ink);font:inherit;width:100%;min-width:0}
+.it .x{border:0;background:none;color:var(--muted);font-size:1.3rem;padding:0}
+.it .lt{grid-column:1/-1;font-size:.8rem;color:var(--muted);margin-top:-4px}
+.it-h{display:grid;grid-template-columns:1fr 64px 92px 32px;gap:6px;font-size:.75rem;color:var(--muted);text-transform:uppercase;letter-spacing:.06em}
+.addit{align-self:flex-start;border:1px dashed var(--line);background:none;color:var(--accent);border-radius:10px;padding:8px 14px;font-weight:600}
+.totalbar{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--utang) 10%,var(--surface))}
+.totalbar b{font-family:var(--display);font-size:1.5rem;color:var(--utang)}
+.sub.late{color:var(--utang);font-weight:600}
+.toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:.9rem;z-index:20}
+@media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
+</style>
+</head>
+<body>
+<div class="wrap" id="app"></div>
+<button class="fab" id="fab" type="button">+ Customer</button>
+<div id="sheetHost"></div>
+<div class="toast" id="toast" hidden></div>
+
+<script>
+(function(){
+const KEY='pautang-notebook-v1';
+const peso=c=>'₱'+(c/100).toLocaleString('en-PH',{minimumFractionDigits:2,maximumFractionDigits:2});
+const today=()=>new Date().toISOString().slice(0,10);
+const uid=()=>Math.random().toString(36).slice(2,10)+Date.now().toString(36);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+const daysAgo=d=>Math.max(0,Math.round((Date.now()-new Date(d+'T00:00:00'))/864e5));
+const fmtDate=d=>new Date(d+'T00:00:00').toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'});
+
+function sample(){
+  const d=n=>{const x=new Date();x.setDate(x.getDate()-n);return x.toISOString().slice(0,10)};
+  const U=(cid,n,items)=>({customerId:cid,type:'utang',items:items.map(([name,qty,price])=>({name,qty,price})),amount:items.reduce((t,[,q,p])=>t+q*p,0),note:'',date:d(n)});
+  const c=[{id:'s1',name:'Aling Nena',phone:''},{id:'s2',name:'Mang Tonyo',phone:''},{id:'s3',name:'Jun-jun (Purok 3)',phone:''},{id:'s4',name:'Ate Liza',phone:''}];
+  const e=[
+    U('s1',18,[['Bigas (1 kilo)',1,5200],['Sardinas',2,2500],['Kopiko 3-in-1',1,1200]]),
+    U('s1',11,[['Mantika (maliit)',1,3500],['Toyo',1,2200],['Suka',1,1800]]),
+    {customerId:'s1',type:'bayad',amount:10000,note:'Hulog',date:d(4)},
+    U('s2',26,[['Red Horse',2,8500],['Sigarilyo (stick)',10,900]]),
+    U('s2',9,[['Load',1,5000],['Yelo',3,500]]),
+    U('s3',2,[['Lucky Me Pancit Canton',3,1500]]),
+    U('s4',15,[['Bear Brand (300g)',1,15000],['Diaper',5,1400],['Sabon (Safeguard)',2,2500]]),
+    {customerId:'s4',type:'bayad',amount:32000,note:'Bayad na lahat (sweldo)',date:d(1)},
+  ].map(x=>({...x,id:uid()}));
+  return {customers:c,entries:e,sample:true};
+}
+function load(){
+  try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.customers))return s}}catch(e){}
+  return sample();
+}
+let S=load();delete S.prices;
+let storageOk=true;
+function save(){try{localStorage.setItem(KEY,JSON.stringify(S));storageOk=true}catch(e){storageOk=false}}
+
+let view={name:'list',q:''};
+
+function balanceOf(id){
+  let b=0;for(const e of S.entries)if(e.customerId===id)b+=e.type==='utang'?e.amount:-e.amount;return b;
+}
+// Days since the oldest still-unpaid utang (payments cover oldest first).
+function unpaidSince(id){
+  const es=S.entries.filter(e=>e.customerId===id).sort((a,b)=>a.date.localeCompare(b.date));
+  let paid=es.filter(e=>e.type==='bayad').reduce((s,e)=>s+e.amount,0);
+  for(const e of es){if(e.type!=='utang')continue;if(paid>=e.amount){paid-=e.amount;continue}return e.date}
+  return null;
+}
+function initials(n){return n.replace(/[^\p{L}\s]/gu,' ').trim().split(/\s+/).filter(Boolean).slice(0,2).map(w=>w[0]).join('').toUpperCase()||'?'}
+function itemsText(e){return (e.items||[]).map(i=>`${i.qty}× ${i.name} @${peso(i.price)}`).join(', ')}
+function qtyStr(q){return Number.isInteger(q)?String(q):String(+q.toFixed(2))}
+
+function render(){
+  const app=document.getElementById('app');
+  document.getElementById('fab').hidden=view.name!=='list';
+  if(view.name==='list')renderList(app);else renderCustomer(app,view.id);
+}
+
+function renderList(app){
+  const rows=S.customers.map(c=>({c,bal:balanceOf(c.id),since:unpaidSince(c.id)}));
+  const total=rows.reduce((s,r)=>s+Math.max(0,r.bal),0);
+  const owing=rows.filter(r=>r.bal>0).length;
+  const q=view.q.trim().toLowerCase();
+  const shown=rows.filter(r=>!q||r.c.name.toLowerCase().includes(q))
+    .sort((a,b)=>(b.bal>0)-(a.bal>0)||b.bal-a.bal||a.c.name.localeCompare(b.c.name));
+  app.innerHTML=`
+  <header class="top">
+    <div class="brand"><h1>Pautang Notebook</h1><small>${storageOk?'Saved on this phone':'Not saving: storage is blocked'}</small></div>
+    <div class="frozen">
+      <div class="lbl">Frozen money (unpaid utang)</div>
+      <div class="amt num">${peso(total)}</div>
+      <div class="meta num">${owing} of ${S.customers.length}<br>customers owe</div>
+    </div>
+    <input class="search" id="q" type="search" placeholder="Search customer" value="${esc(view.q)}" aria-label="Search customer">
+  </header>
+  ${S.sample?`<div class="banner"><span>These are <b>sample customers</b> so you can try it.</span><button type="button" id="clearSample">Clear samples, start mine</button></div>`:''}
+  <div class="section-h"><span>Customers</span><span>Balance</span></div>
+  <div class="list">
+    ${shown.length?shown.map(({c,bal,since})=>{
+      const d=since?daysAgo(since):0;
+      const late=bal>0&&d>=14;
+      const sub=bal>0?`Unpaid ${d===0?'since today':d===1?'1 day':d+' days'}`:bal<0?'Advance payment':'<span class="pill paid">Bayad na</span>';
+      return `<button class="row" type="button" data-id="${c.id}">
+        <span class="av" aria-hidden="true">${esc(initials(c.name))}</span>
+        <span class="who"><div class="name">${esc(c.name)}</div><div class="sub${late?' late':''}">${sub}</div></span>
+        <span class="bal num ${bal>0?'owes':'clear'}">${peso(Math.abs(bal))}${bal<0?' cr':''}</span>
+      </button>`}).join(''):`<div class="empty">${q?'No customer matches "'+esc(view.q)+'".':'No customers yet. Tap <b>+ Customer</b> to add your first suki.'}</div>`}
+  </div>`;
+  const qi=app.querySelector('#q');
+  qi.addEventListener('input',e=>{view.q=e.target.value;const pos=e.target.selectionStart;render();const n=document.getElementById('q');n.focus();n.setSelectionRange(pos,pos)});
+  app.querySelectorAll('.row').forEach(b=>b.addEventListener('click',()=>{view={name:'cust',id:b.dataset.id,q:view.q};render();window.scrollTo(0,0)}));
+  const cs=app.querySelector('#clearSample');
+  if(cs)cs.addEventListener('click',()=>{const ids=new Set(['s1','s2','s3','s4']);S.customers=S.customers.filter(c=>!ids.has(c.id));S.entries=S.entries.filter(e=>!ids.has(e.customerId));delete S.sample;save();render();toast('Samples cleared')});
+}
+
+function renderCustomer(app,id){
+  const c=S.customers.find(x=>x.id===id);
+  if(!c){view={name:'list',q:''};return render()}
+  const es=S.entries.filter(e=>e.customerId===id).sort((a,b)=>a.date.localeCompare(b.date)||0);
+  let run=0;const withRun=es.map(e=>{run+=e.type==='utang'?e.amount:-e.amount;return{...e,run}}).reverse();
+  const bal=run;
+  app.innerHTML=`
+  <div class="top" style="padding-bottom:0"><button class="back" type="button" id="back">← All customers</button></div>
+  <div class="cust-h">
+    <h2>${esc(c.name)}</h2>
+    <div class="bal num ${bal>0?'owes':'clear'}">${peso(Math.abs(bal))}${bal<0?' advance':''}</div>
+    <div style="color:var(--muted);font-size:.9rem">${bal>0?'Current utang balance':bal<0?'Paid ahead':'Fully paid'}${c.phone?' · '+esc(c.phone):''}</div>
+  </div>
+  <div class="actions">
+    <button class="btn utang" type="button" id="addU">+ Utang</button>
+    <button class="btn bayad" type="button" id="addB">+ Bayad</button>
+  </div>
+  <div class="section-h"><span>History (newest first)</span><span>Balance after</span></div>
+  <div class="ledger">
+    ${withRun.length?withRun.map(e=>`<button class="ent ${e.type}" type="button" data-eid="${e.id}">
+      <span class="d">${fmtDate(e.date)} · ${e.type==='utang'?'Utang':'Bayad'}</span><span class="a num">${e.type==='utang'?'+':'−'}${peso(e.amount)}</span>
+      <span class="n">${[itemsText(e),e.note].filter(Boolean).map(esc).join(' · ')||'<span style="color:var(--muted)">No note</span>'}</span><span class="r num">${peso(e.run)}</span>
+    </button>`).join(''):'<div class="empty">No records yet. Tap <b>+ Utang</b> when they get items on credit.</div>'}
+  </div>
+  <div class="tools">
+    <button class="btn ghost" type="button" id="editC">Edit name</button>
+    <button class="btn danger" type="button" id="delC">Delete customer</button>
+  </div>`;
+  app.querySelector('#back').onclick=()=>{view={name:'list',q:view.q};render()};
+  app.querySelector('#addU').onclick=()=>entrySheet(id,'utang');
+  app.querySelector('#addB').onclick=()=>entrySheet(id,'bayad',bal>0?bal:0);
+  app.querySelector('#editC').onclick=()=>customerSheet(c);
+  app.querySelector('#delC').onclick=()=>confirmSheet(`Delete ${c.name}?`,`This removes ${c.name} and all ${es.length} record${es.length===1?'':'s'}.${bal>0?' They still owe '+peso(bal)+'.':''}`,'Delete',()=>{
+    S.customers=S.customers.filter(x=>x.id!==id);S.entries=S.entries.filter(e=>e.customerId!==id);save();view={name:'list',q:''};render();toast('Customer deleted')});
+  app.querySelectorAll('.ent').forEach(b=>b.onclick=()=>{const e=S.entries.find(x=>x.id===b.dataset.eid);entrySheet(id,e.type,0,e)});
+}
+
+/* Sheets */
+function openSheet(html,bind){
+  const host=document.getElementById('sheetHost');
+  host.innerHTML=`<div class="scrim" id="scrim"><form class="sheet" id="sheet" novalidate>${html}</form></div>`;
+  const close=()=>{host.innerHTML=''};
+  host.querySelector('#scrim').addEventListener('click',e=>{if(e.target.id==='scrim')close()});
+  host.querySelectorAll('[data-close]').forEach(b=>b.onclick=close);
+  document.addEventListener('keydown',function k(e){if(e.key==='Escape'){close();document.removeEventListener('keydown',k)}});
+  bind(host.querySelector('#sheet'),close);
+  const f=host.querySelector('input,textarea');if(f)setTimeout(()=>f.focus(),50);
+}
+function parseAmt(v){const n=Number(String(v).replace(/[,₱\s]/g,''));return isFinite(n)&&n>0?Math.round(n*100):0}
+
+function customerSheet(c){
+  openSheet(`<h3>${c?'Edit customer':'New customer'}</h3>
+    <div class="field"><label for="cn">Name</label><input id="cn" autocomplete="off" value="${esc(c?.name)}" placeholder="e.g. Aling Nena"></div>
+    <div class="field"><label for="cp">Phone (optional)</label><input id="cp" inputmode="tel" value="${esc(c?.phone)}" placeholder="09xx xxx xxxx"></div>
+    <div class="err" id="er"></div>
+    <div class="row2"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn pri" type="submit">${c?'Save':'Add customer'}</button></div>`,
+  (f,close)=>f.addEventListener('submit',ev=>{ev.preventDefault();
+    const name=f.querySelector('#cn').value.trim(),phone=f.querySelector('#cp').value.trim();
+    if(!name){f.querySelector('#er').textContent='Enter a name.';return}
+    if(S.customers.some(x=>x.name.toLowerCase()===name.toLowerCase()&&x.id!==c?.id)){f.querySelector('#er').textContent='There is already a customer with this name. Add a purok or nickname to tell them apart.';return}
+    if(c){c.name=name;c.phone=phone;toast('Saved')}
+    else{const n={id:uid(),name,phone};S.customers.push(n);view={name:'cust',id:n.id,q:''};toast(name+' added')}
+    save();close();render()}));
+}
+
+function entrySheet(cid,type,suggest=0,edit=null){
+  if(type==='utang'&&!(edit&&!edit.items))return utangSheet(cid,edit);
+  const c=S.customers.find(x=>x.id===cid);
+  const isU=type==='utang';
+  const quick=isU?[20,50,100,200,500]:[50,100,200,500];
+  openSheet(`<h3>${edit?'Edit ':''}${isU?'Utang':'Bayad'} · ${esc(c.name)}</h3>
+    <div class="field"><label for="am">Amount</label><div class="peso"><span>₱</span><input id="am" inputmode="decimal" autocomplete="off" value="${edit?(edit.amount/100):''}" placeholder="0.00"></div></div>
+    <div class="quick">${quick.map(q=>`<button type="button" data-q="${q}">₱${q}</button>`).join('')}${!isU&&suggest?`<button type="button" data-q="${suggest/100}">Full ${peso(suggest)}</button>`:''}</div>
+    <div class="field"><label for="nt">${isU?'Items taken (note)':'Note (optional)'}</label><textarea id="nt" placeholder="${isU?'e.g. 1 kilo bigas, 2 sardinas, Kopiko':'e.g. Hulog, sweldo'}">${esc(edit?.note)}</textarea></div>
+    <div class="field"><label for="dt">Date</label><input id="dt" type="date" value="${edit?.date||today()}" max="${today()}"></div>
+    <div class="err" id="er"></div>
+    <div class="row2"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn ${isU?'utang':'bayad'}" type="submit">${edit?'Save':isU?'Record utang':'Record bayad'}</button></div>
+    ${edit?'<button class="btn danger" type="button" id="delE">Delete this record</button>':''}`,
+  (f,close)=>{
+    const am=f.querySelector('#am');
+    f.querySelectorAll('[data-q]').forEach(b=>b.onclick=()=>{am.value=b.dataset.q;am.focus()});
+    f.addEventListener('submit',ev=>{ev.preventDefault();
+      const amount=parseAmt(am.value);
+      if(!amount){f.querySelector('#er').textContent='Enter an amount greater than ₱0.';return}
+      const note=f.querySelector('#nt').value.trim(),date=f.querySelector('#dt').value||today();
+      if(edit)Object.assign(edit,{amount,note,date});
+      else S.entries.push({id:uid(),customerId:cid,type,amount,note,date});
+      save();close();render();toast(edit?'Saved':(isU?'Utang ':'Bayad ')+peso(amount)+' recorded')});
+    const d=f.querySelector('#delE');
+    if(d)d.onclick=()=>confirmSheet('Delete this record?',`${isU?'Utang':'Bayad'} of ${peso(edit.amount)} on ${fmtDate(edit.date)} will be removed.`,'Delete',()=>{
+      S.entries=S.entries.filter(x=>x.id!==edit.id);save();render();toast('Record deleted')});
+  });
+}
+
+function utangSheet(cid,edit){
+  const c=S.customers.find(x=>x.id===cid);
+  // Product names only (never prices) so the same item is quick to type.
+  const known=[...new Set(S.entries.flatMap(e=>(e.items||[]).map(i=>i.name)))].sort((a,b)=>a.localeCompare(b));
+  const start=edit?edit.items.map(i=>({...i})):[{name:'',qty:1,price:0}];
+  const rowHtml=(i,k)=>`<div class="it" data-k="${k}">
+      <input class="nm" list="plist" autocomplete="off" placeholder="Product" value="${esc(i.name)}" aria-label="Product">
+      <input class="qt num" inputmode="decimal" value="${i.qty?qtyStr(i.qty):''}" aria-label="Quantity">
+      <input class="pr num" inputmode="decimal" placeholder="₱ price" value="${i.price?i.price/100:''}" aria-label="Price each">
+      <button type="button" class="x" aria-label="Remove item">×</button>
+      <div class="lt num"></div></div>`;
+  openSheet(`<h3>${edit?'Edit utang':'Utang'} · ${esc(c.name)}</h3>
+    <datalist id="plist">${known.map(n=>`<option value="${esc(n)}"></option>`).join('')}</datalist>
+    <div class="it-h"><span>Product</span><span>Qty</span><span>Price each</span><span></span></div>
+    <div class="items" id="items">${start.map(rowHtml).join('')}</div>
+    <button type="button" class="addit" id="addIt">+ Add item</button>
+    <div class="totalbar"><span>Total utang</span><b class="num" id="tot">₱0.00</b></div>
+    <div class="field"><label for="nt">Note (optional)</label><input id="nt" value="${esc(edit?.note)}" placeholder="e.g. Kukunin ng anak"></div>
+    <div class="field"><label for="dt">Date</label><input id="dt" type="date" value="${edit?.date||today()}" max="${today()}"></div>
+    <div class="err" id="er"></div>
+    <div class="row2"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn utang" type="submit">${edit?'Save':'Record utang'}</button></div>
+    ${edit?'<button class="btn danger" type="button" id="delE">Delete this record</button>':''}`,
+  (f,close)=>{
+    const box=f.querySelector('#items');
+    const num=v=>{const n=Number(String(v).replace(/[,₱\s]/g,''));return isFinite(n)&&n>0?n:0};
+    const read=()=>[...box.querySelectorAll('.it')].map(r=>({name:r.querySelector('.nm').value.trim(),qty:num(r.querySelector('.qt').value),price:Math.round(num(r.querySelector('.pr').value)*100)}));
+    const recalc=()=>{let t=0;box.querySelectorAll('.it').forEach((r,i)=>{const it=read()[i];const lt=Math.round(it.qty*it.price);t+=lt;r.querySelector('.lt').textContent=it.name&&it.price?`${qtyStr(it.qty||0)} × ${peso(it.price)} = ${peso(lt)}`:''});f.querySelector('#tot').textContent=peso(t);return t};
+    const wire=r=>{
+      const nm=r.querySelector('.nm'),pr=r.querySelector('.pr');
+      nm.addEventListener('input',recalc);
+      r.querySelectorAll('.qt,.pr').forEach(x=>x.addEventListener('input',recalc));
+      r.querySelector('.x').onclick=()=>{if(box.children.length>1)r.remove();else{nm.value='';pr.value='';r.querySelector('.qt').value='1'}recalc()};
+    };
+    box.querySelectorAll('.it').forEach(wire);
+    f.querySelector('#addIt').onclick=()=>{box.insertAdjacentHTML('beforeend',rowHtml({name:'',qty:1,price:0},box.children.length));const r=box.lastElementChild;wire(r);r.querySelector('.nm').focus()};
+    recalc();
+    f.addEventListener('submit',ev=>{ev.preventDefault();
+      const er=f.querySelector('#er');
+      const rows=read().filter(i=>i.name||i.price);
+      if(!rows.length){er.textContent='Add at least one product with its price.';return}
+      const bad=rows.find(i=>!i.name||!i.price||!i.qty);
+      if(bad){er.textContent=!bad.name?'One item has a price but no product name.':!bad.qty?`Enter a quantity for ${bad.name}.`:`Enter the price of ${bad.name}.`;return}
+      const items=rows.map(i=>({name:i.name,qty:i.qty,price:i.price}));
+      const amount=items.reduce((t,i)=>t+Math.round(i.qty*i.price),0);
+      const note=f.querySelector('#nt').value.trim(),date=f.querySelector('#dt').value||today();
+      if(edit)Object.assign(edit,{items,amount,note,date});
+      else S.entries.push({id:uid(),customerId:cid,type:'utang',items,amount,note,date});
+      save();close();render();toast(edit?'Saved':'Utang '+peso(amount)+' recorded')});
+    const d=f.querySelector('#delE');
+    if(d)d.onclick=()=>confirmSheet('Delete this record?',`Utang of ${peso(edit.amount)} on ${fmtDate(edit.date)} will be removed.`,'Delete',()=>{
+      S.entries=S.entries.filter(x=>x.id!==edit.id);save();render();toast('Record deleted')});
+  });
+}
+
+function confirmSheet(title,body,label,onYes){
+  openSheet(`<h3>${esc(title)}</h3><p style="margin:0;color:var(--muted)">${esc(body)}</p>
+    <div class="row2"><button class="btn ghost" type="button" data-close>Cancel</button><button class="btn utang" type="submit">${esc(label)}</button></div>`,
+  (f,close)=>f.addEventListener('submit',ev=>{ev.preventDefault();close();onYes()}));
+}
+
+let tt;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2200)}
+
+document.getElementById('fab').onclick=()=>customerSheet(null);
+render();
+})();
+</script>
+<script>
+if('serviceWorker' in navigator){window.addEventListener('load',()=>navigator.serviceWorker.register('sw.js').catch(()=>{}))}
+</script>
+</body>
+</html>
