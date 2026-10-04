@@ -124,6 +124,13 @@ button:focus-visible,input:focus-visible,textarea:focus-visible{outline:3px soli
 .totalbar{display:flex;justify-content:space-between;align-items:baseline;padding:12px 14px;border-radius:12px;background:color-mix(in srgb,var(--utang) 10%,var(--surface))}
 .totalbar b{font-family:var(--display);font-size:1.5rem;color:var(--utang)}
 .sub.late{color:var(--utang);font-weight:600}
+.net{font-size:.8rem;color:var(--muted)}
+.net.offline,.net.error{color:var(--utang);font-weight:600}
+.net.online{color:var(--bayad)}
+.logout{align-self:center;background:none;border:0;color:var(--muted);text-decoration:underline;padding:8px}
+.login{max-width:360px;margin:18vh auto 0;display:flex;flex-direction:column;gap:14px}
+.login h1{font-family:var(--display);font-weight:800;font-size:1.8rem;margin:0}
+.login p{margin:0;color:var(--muted)}
 .toast{position:fixed;left:50%;bottom:calc(84px + env(safe-area-inset-bottom,0px));transform:translateX(-50%);background:var(--ink);color:var(--bg);padding:10px 16px;border-radius:999px;font-size:.9rem;z-index:20}
 @media (prefers-reduced-motion:no-preference){.sheet{animation:up .18s ease-out}@keyframes up{from{transform:translateY(24px);opacity:.6}}}
 </style>
@@ -144,29 +151,97 @@ const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&
 const daysAgo=d=>Math.max(0,Math.round((Date.now()-new Date(d+'T00:00:00'))/864e5));
 const fmtDate=d=>new Date(d+'T00:00:00').toLocaleDateString('en-PH',{month:'short',day:'numeric',year:'numeric'});
 
-function sample(){
-  const d=n=>{const x=new Date();x.setDate(x.getDate()-n);return x.toISOString().slice(0,10)};
-  const U=(cid,n,items)=>({customerId:cid,type:'utang',items:items.map(([name,qty,price])=>({name,qty,price})),amount:items.reduce((t,[,q,p])=>t+q*p,0),note:'',date:d(n)});
-  const c=[{id:'s1',name:'Aling Nena',phone:''},{id:'s2',name:'Mang Tonyo',phone:''},{id:'s3',name:'Jun-jun (Purok 3)',phone:''},{id:'s4',name:'Ate Liza',phone:''}];
-  const e=[
-    U('s1',18,[['Bigas (1 kilo)',1,5200],['Sardinas',2,2500],['Kopiko 3-in-1',1,1200]]),
-    U('s1',11,[['Mantika (maliit)',1,3500],['Toyo',1,2200],['Suka',1,1800]]),
-    {customerId:'s1',type:'bayad',amount:10000,note:'Hulog',date:d(4)},
-    U('s2',26,[['Red Horse',2,8500],['Sigarilyo (stick)',10,900]]),
-    U('s2',9,[['Load',1,5000],['Yelo',3,500]]),
-    U('s3',2,[['Lucky Me Pancit Canton',3,1500]]),
-    U('s4',15,[['Bear Brand (300g)',1,15000],['Diaper',5,1400],['Sabon (Safeguard)',2,2500]]),
-    {customerId:'s4',type:'bayad',amount:32000,note:'Bayad na lahat (sweldo)',date:d(1)},
-  ].map(x=>({...x,id:uid()}));
-  return {customers:c,entries:e,sample:true};
+const CACHE_KEY='pautang-cache-v2',QUEUE_KEY='pautang-queue-v2',LEGACY_KEY=KEY,IMPORTED_KEY='pautang-imported';
+const ls={get(k,d){try{const v=localStorage.getItem(k);return v?JSON.parse(v):d}catch(e){return d}},set(k,v){try{localStorage.setItem(k,JSON.stringify(v))}catch(e){}}};
+let S=ls.get(CACHE_KEY,null)||{customers:[],entries:[]};
+let queue=ls.get(QUEUE_KEY,[]);
+let net={state:'loading',authed:true};   // state: loading | online | saving | offline | error
+function save(){ls.set(CACHE_KEY,S)}
+
+/* Online saving. Every change goes into a queue that is sent in order;
+   if the phone is offline the queue waits and is sent when it reconnects. */
+async function api(method,path,body){
+  const r=await fetch(path,{method,headers:body?{'Content-Type':'application/json'}:{},body:body?JSON.stringify(body):undefined,credentials:'same-origin'});
+  let data={};try{data=await r.json()}catch(e){}
+  return {status:r.status,data};
 }
-function load(){
-  try{const raw=localStorage.getItem(KEY);if(raw){const s=JSON.parse(raw);if(s&&Array.isArray(s.customers))return s}}catch(e){}
-  return sample();
+function enqueue(method,path,body){queue.push({method,path,body});ls.set(QUEUE_KEY,queue);save();flush()}
+const putCustomer=c=>enqueue('PUT','/api/customers/'+c.id,{name:c.name,phone:c.phone||''});
+const delCustomer=id=>enqueue('DELETE','/api/customers/'+id);
+const putEntry=e=>enqueue('PUT','/api/entries/'+e.id,{customerId:e.customerId,type:e.type,amount:e.amount,items:e.items,note:e.note||'',date:e.date});
+const delEntry=id=>enqueue('DELETE','/api/entries/'+id);
+let flushing=false;
+async function flush(){
+  if(flushing)return;flushing=true;
+  try{
+    while(queue.length){
+      setNet('saving');
+      let r;
+      try{r=await api(queue[0].method,queue[0].path,queue[0].body)}catch(e){setNet('offline');return}
+      if(r.status===401){net.authed=false;render();return}
+      if(r.status>=500){setNet('error');return}
+      if(r.status>=400)toast(r.data.error||'One change could not be saved.');
+      queue.shift();ls.set(QUEUE_KEY,queue);
+    }
+    await refresh();
+  }finally{flushing=false}
 }
-let S=load();delete S.prices;
-let storageOk=true;
-function save(){try{localStorage.setItem(KEY,JSON.stringify(S));storageOk=true}catch(e){storageOk=false}}
+async function refresh(){
+  if(queue.length)return flush();
+  let r;
+  try{r=await api('GET','/api/data')}catch(e){setNet('offline');return}
+  if(r.status===401){net.authed=false;render();return}
+  if(r.status!==200){setNet('error');return}
+  const next={customers:r.data.customers,entries:r.data.entries};
+  const changed=JSON.stringify(next)!==JSON.stringify(S)||!net.authed;
+  S=next;save();net.authed=true;setNet('online',changed);
+}
+function setNet(state,rerender){
+  const changed=net.state!==state;net.state=state;
+  const el=document.getElementById('netState');
+  if(el&&!rerender){el.textContent=netText();el.className='net '+state}
+  else if(changed||rerender)render();
+}
+function netText(){
+  const n=queue.length;
+  return {loading:'Loading…',online:'Saved online',saving:'Saving…',offline:n?`Offline · ${n} change${n>1?'s':''} waiting`:'Offline · showing last saved',error:'Server problem · will retry'}[net.state];
+}
+window.addEventListener('online',flush);
+setInterval(()=>{if(queue.length)flush()},30000);
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh()});
+
+// Records kept on this phone by the first (offline-only) version, offered for upload once.
+function legacyData(){
+  if(ls.get(IMPORTED_KEY,false))return null;
+  const L=ls.get(LEGACY_KEY,null);
+  if(!L||!Array.isArray(L.customers))return null;
+  const sampleIds=new Set(['s1','s2','s3','s4']);
+  const customers=L.customers.filter(c=>!sampleIds.has(c.id));
+  if(!customers.length)return null;
+  const ids=new Set(customers.map(c=>c.id));
+  return {customers,entries:(L.entries||[]).filter(e=>ids.has(e.customerId))};
+}
+
+function renderLogin(app){
+  document.getElementById('fab').hidden=true;
+  app.innerHTML=`<form class="login" id="loginF" novalidate>
+    <h1>Pautang Notebook</h1>
+    <p>Enter your store password to see your records.</p>
+    <div class="field"><label for="pw">Password</label><input id="pw" type="password" autocomplete="current-password"></div>
+    <div class="err" id="er"></div>
+    <button class="btn pri" type="submit">Log in</button>
+  </form>`;
+  const f=app.querySelector('#loginF');
+  setTimeout(()=>f.querySelector('#pw').focus(),50);
+  f.addEventListener('submit',async ev=>{ev.preventDefault();
+    const er=f.querySelector('#er');er.textContent='';
+    try{
+      const r=await api('POST','/api/login',{password:f.querySelector('#pw').value});
+      if(r.status!==200){er.textContent=r.data.error||'Could not log in.';return}
+      net.authed=true;render();flush();
+    }catch(e){er.textContent='No internet connection. Connect and try again.'}
+  });
+}
 
 let view={name:'list',q:''};
 
@@ -186,6 +261,7 @@ function qtyStr(q){return Number.isInteger(q)?String(q):String(+q.toFixed(2))}
 
 function render(){
   const app=document.getElementById('app');
+  if(!net.authed)return renderLogin(app);
   document.getElementById('fab').hidden=view.name!=='list';
   if(view.name==='list')renderList(app);else renderCustomer(app,view.id);
 }
@@ -194,12 +270,13 @@ function renderList(app){
   const rows=S.customers.map(c=>({c,bal:balanceOf(c.id),since:unpaidSince(c.id)}));
   const total=rows.reduce((s,r)=>s+Math.max(0,r.bal),0);
   const owing=rows.filter(r=>r.bal>0).length;
+  const legacy=legacyData();
   const q=view.q.trim().toLowerCase();
   const shown=rows.filter(r=>!q||r.c.name.toLowerCase().includes(q))
     .sort((a,b)=>(b.bal>0)-(a.bal>0)||b.bal-a.bal||a.c.name.localeCompare(b.c.name));
   app.innerHTML=`
   <header class="top">
-    <div class="brand"><h1>Pautang Notebook</h1><small>${storageOk?'Saved on this phone':'Not saving: storage is blocked'}</small></div>
+    <div class="brand"><h1>Pautang Notebook</h1><small id="netState" class="net ${net.state}">${netText()}</small></div>
     <div class="frozen">
       <div class="lbl">Frozen money (unpaid utang)</div>
       <div class="amt num">${peso(total)}</div>
@@ -207,7 +284,7 @@ function renderList(app){
     </div>
     <input class="search" id="q" type="search" placeholder="Search customer" value="${esc(view.q)}" aria-label="Search customer">
   </header>
-  ${S.sample?`<div class="banner"><span>These are <b>sample customers</b> so you can try it.</span><button type="button" id="clearSample">Clear samples, start mine</button></div>`:''}
+  ${legacy?`<div class="banner"><span>This phone has <b>${legacy.customers.length} customer${legacy.customers.length>1?'s':''}</b> from the offline version.</span><button type="button" id="importL">Move them online</button></div>`:''}
   <div class="section-h"><span>Customers</span><span>Balance</span></div>
   <div class="list">
     ${shown.length?shown.map(({c,bal,since})=>{
@@ -219,12 +296,19 @@ function renderList(app){
         <span class="who"><div class="name">${esc(c.name)}</div><div class="sub${late?' late':''}">${sub}</div></span>
         <span class="bal num ${bal>0?'owes':'clear'}">${peso(Math.abs(bal))}${bal<0?' cr':''}</span>
       </button>`}).join(''):`<div class="empty">${q?'No customer matches "'+esc(view.q)+'".':'No customers yet. Tap <b>+ Customer</b> to add your first suki.'}</div>`}
-  </div>`;
+  </div>
+  <button class="logout" type="button" id="logout">Log out</button>`;
   const qi=app.querySelector('#q');
   qi.addEventListener('input',e=>{view.q=e.target.value;const pos=e.target.selectionStart;render();const n=document.getElementById('q');n.focus();n.setSelectionRange(pos,pos)});
   app.querySelectorAll('.row').forEach(b=>b.addEventListener('click',()=>{view={name:'cust',id:b.dataset.id,q:view.q};render();window.scrollTo(0,0)}));
-  const cs=app.querySelector('#clearSample');
-  if(cs)cs.addEventListener('click',()=>{const ids=new Set(['s1','s2','s3','s4']);S.customers=S.customers.filter(c=>!ids.has(c.id));S.entries=S.entries.filter(e=>!ids.has(e.customerId));delete S.sample;save();render();toast('Samples cleared')});
+  const im=app.querySelector('#importL');
+  if(im)im.addEventListener('click',async()=>{
+    im.disabled=true;
+    try{const r=await api('POST','/api/import',legacy);
+      if(r.status!==200){toast(r.data.error||'Could not move them. Try again.');im.disabled=false;return}
+      ls.set(IMPORTED_KEY,true);toast(`Moved ${r.data.customers} customers online`);refresh();
+    }catch(e){toast('No internet connection. Try again when online.');im.disabled=false}});
+  app.querySelector('#logout').onclick=async()=>{try{await api('POST','/api/logout')}catch(e){}net.authed=false;S={customers:[],entries:[]};save();render()};
 }
 
 function renderCustomer(app,id){
@@ -260,7 +344,7 @@ function renderCustomer(app,id){
   app.querySelector('#addB').onclick=()=>entrySheet(id,'bayad',bal>0?bal:0);
   app.querySelector('#editC').onclick=()=>customerSheet(c);
   app.querySelector('#delC').onclick=()=>confirmSheet(`Delete ${c.name}?`,`This removes ${c.name} and all ${es.length} record${es.length===1?'':'s'}.${bal>0?' They still owe '+peso(bal)+'.':''}`,'Delete',()=>{
-    S.customers=S.customers.filter(x=>x.id!==id);S.entries=S.entries.filter(e=>e.customerId!==id);save();view={name:'list',q:''};render();toast('Customer deleted')});
+    S.customers=S.customers.filter(x=>x.id!==id);S.entries=S.entries.filter(e=>e.customerId!==id);delCustomer(id);view={name:'list',q:''};render();toast('Customer deleted')});
   app.querySelectorAll('.ent').forEach(b=>b.onclick=()=>{const e=S.entries.find(x=>x.id===b.dataset.eid);entrySheet(id,e.type,0,e)});
 }
 
@@ -287,9 +371,9 @@ function customerSheet(c){
     const name=f.querySelector('#cn').value.trim(),phone=f.querySelector('#cp').value.trim();
     if(!name){f.querySelector('#er').textContent='Enter a name.';return}
     if(S.customers.some(x=>x.name.toLowerCase()===name.toLowerCase()&&x.id!==c?.id)){f.querySelector('#er').textContent='There is already a customer with this name. Add a purok or nickname to tell them apart.';return}
-    if(c){c.name=name;c.phone=phone;toast('Saved')}
-    else{const n={id:uid(),name,phone};S.customers.push(n);view={name:'cust',id:n.id,q:''};toast(name+' added')}
-    save();close();render()}));
+    if(c){c.name=name;c.phone=phone;putCustomer(c);toast('Saved')}
+    else{const n={id:uid(),name,phone};S.customers.push(n);putCustomer(n);view={name:'cust',id:n.id,q:''};toast(name+' added')}
+    close();render()}));
 }
 
 function entrySheet(cid,type,suggest=0,edit=null){
@@ -312,12 +396,13 @@ function entrySheet(cid,type,suggest=0,edit=null){
       const amount=parseAmt(am.value);
       if(!amount){f.querySelector('#er').textContent='Enter an amount greater than ₱0.';return}
       const note=f.querySelector('#nt').value.trim(),date=f.querySelector('#dt').value||today();
-      if(edit)Object.assign(edit,{amount,note,date});
-      else S.entries.push({id:uid(),customerId:cid,type,amount,note,date});
-      save();close();render();toast(edit?'Saved':(isU?'Utang ':'Bayad ')+peso(amount)+' recorded')});
+      let e=edit;
+      if(e)Object.assign(e,{amount,note,date});
+      else{e={id:uid(),customerId:cid,type,amount,note,date};S.entries.push(e)}
+      putEntry(e);close();render();toast(edit?'Saved':(isU?'Utang ':'Bayad ')+peso(amount)+' recorded')});
     const d=f.querySelector('#delE');
     if(d)d.onclick=()=>confirmSheet('Delete this record?',`${isU?'Utang':'Bayad'} of ${peso(edit.amount)} on ${fmtDate(edit.date)} will be removed.`,'Delete',()=>{
-      S.entries=S.entries.filter(x=>x.id!==edit.id);save();render();toast('Record deleted')});
+      S.entries=S.entries.filter(x=>x.id!==edit.id);delEntry(edit.id);render();toast('Record deleted')});
   });
 }
 
@@ -366,12 +451,13 @@ function utangSheet(cid,edit){
       const items=rows.map(i=>({name:i.name,qty:i.qty,price:i.price}));
       const amount=items.reduce((t,i)=>t+Math.round(i.qty*i.price),0);
       const note=f.querySelector('#nt').value.trim(),date=f.querySelector('#dt').value||today();
-      if(edit)Object.assign(edit,{items,amount,note,date});
-      else S.entries.push({id:uid(),customerId:cid,type:'utang',items,amount,note,date});
-      save();close();render();toast(edit?'Saved':'Utang '+peso(amount)+' recorded')});
+      let e=edit;
+      if(e)Object.assign(e,{items,amount,note,date});
+      else{e={id:uid(),customerId:cid,type:'utang',items,amount,note,date};S.entries.push(e)}
+      putEntry(e);close();render();toast(edit?'Saved':'Utang '+peso(amount)+' recorded')});
     const d=f.querySelector('#delE');
     if(d)d.onclick=()=>confirmSheet('Delete this record?',`Utang of ${peso(edit.amount)} on ${fmtDate(edit.date)} will be removed.`,'Delete',()=>{
-      S.entries=S.entries.filter(x=>x.id!==edit.id);save();render();toast('Record deleted')});
+      S.entries=S.entries.filter(x=>x.id!==edit.id);delEntry(edit.id);render();toast('Record deleted')});
   });
 }
 
@@ -384,7 +470,7 @@ function confirmSheet(title,body,label,onYes){
 let tt;function toast(m){const t=document.getElementById('toast');t.textContent=m;t.hidden=false;clearTimeout(tt);tt=setTimeout(()=>t.hidden=true,2200)}
 
 document.getElementById('fab').onclick=()=>customerSheet(null);
-render();
+render();refresh();
 })();
 </script>
 <script>

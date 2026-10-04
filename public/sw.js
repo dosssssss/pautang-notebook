@@ -1,5 +1,5 @@
 // Bump CACHE when any app file changes so phones pick up the new version.
-const CACHE = 'pautang-v1';
+const CACHE = 'pautang-v2';
 const SHELL = ['./', 'index.html', 'manifest.webmanifest', 'icons/icon-192.png', 'icons/icon-512.png', 'icons/maskable-512.png', 'icons/apple-touch-icon.png'];
 
 self.addEventListener('install', e => {
@@ -24,7 +24,7 @@ self.addEventListener('fetch', e => {
     })));
     return;
   }
-  if (url.origin !== location.origin) return;
+  if (url.origin !== location.origin || url.pathname.startsWith('/api/')) return;
   e.respondWith(fetch(req).then(res => {
     const copy = res.clone();
     caches.open(CACHE).then(c => c.put(req, copy));
